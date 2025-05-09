@@ -21,6 +21,9 @@ func main() {
 	// Middleware to handle CORS
 	r.Use(middlewares.CORSMiddleware())
 
+	// Middleware to log requests
+	r.Use(middlewares.Logger())
+
 	// Health Check route
 	r.GET("/health", controllers.HealthCheck)
 
