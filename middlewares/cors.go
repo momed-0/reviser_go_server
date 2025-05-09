@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -8,7 +9,7 @@ import (
 
 func CORSMiddleware() gin.HandlerFunc {
 	// Define allowed origins
-	originsString := "https://reviser.netlify.app,http://localhost:3000"
+	originsString := os.Getenv("ALLOWED_ORIGINS")
 	var allowedOrigins []string
 	if originsString != "" {
 		// Split the originsString into individual origins
