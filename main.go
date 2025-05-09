@@ -18,6 +18,12 @@ func init() {
 func main() {
 	r := gin.Default()
 
+	// Middleware to handle CORS
+	r.Use(middlewares.CORSMiddleware())
+
+	// Health Check route
+	r.GET("/health", controllers.HealthCheck)
+
 	// Authentication routes
 	{
 		authGroups := r.Group("/auth")
