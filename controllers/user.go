@@ -13,6 +13,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var domain = os.Getenv("DOMAIN")
+var secure = domain != "localhost"
+
 func Signup(ctx *gin.Context) {
 	var body struct {
 		Name     string
@@ -86,9 +89,12 @@ func Login(ctx *gin.Context) {
 		ctx.JSON(500, gin.H{"error": "error signing token"})
 		return
 	}
-
-	ctx.SetSameSite(http.SameSiteLaxMode)
-	ctx.SetCookie("Authorization", tokenString, 3600*24*30, "", "localhost", false, true)
+	if secure {
+		ctx.SetSameSite(http.SameSiteNoneMode)
+	} else {
+		ctx.SetSameSite(http.SameSiteLaxMode)
+	}
+	ctx.SetCookie("Authorization", tokenString, 3600*24*30, "", domain, secure, true)
 	ctx.JSON(200, gin.H{"data": "Successfully logged in!", "user": body.Username})
 }
 
@@ -104,7 +110,11 @@ func Validate(ctx *gin.Context) {
 }
 
 func Logout(ctx *gin.Context) {
-	ctx.SetSameSite(http.SameSiteLaxMode)
-	ctx.SetCookie("Authorization", "", -1, "", "localhost", false, true)
+	if secure {
+		ctx.SetSameSite(http.SameSiteNoneMode)
+	} else {
+		ctx.SetSameSite(http.SameSiteLaxMode)
+	}
+	ctx.SetCookie("Authorization", "", -1, "", domain, secure, true)
 	ctx.JSON(200, gin.H{"data": "You are logged out!"})
 }

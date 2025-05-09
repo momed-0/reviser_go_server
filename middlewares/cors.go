@@ -8,7 +8,7 @@ import (
 
 func CORSMiddleware() gin.HandlerFunc {
 	// Define allowed origins
-	originsString := "https://reviser.netlify.app, http://localhost:3000"
+	originsString := "https://reviser.netlify.app,http://localhost:3000"
 	var allowedOrigins []string
 	if originsString != "" {
 		// Split the originsString into individual origins
