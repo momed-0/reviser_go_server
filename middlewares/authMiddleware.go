@@ -1,6 +1,7 @@
 package middlewares
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
@@ -49,10 +50,16 @@ func RequireAuth(ctx *gin.Context) {
 		}
 
 		var user models.User
-		inits.DB.Where("username = ?", username).First(&user)
-		if user.ID == 0 {
-			ctx.JSON(401, gin.H{"error": "unauthorized", "message": "User not found"})
-			ctx.AbortWithStatus(http.StatusUnauthorized)
+		row := inits.DB.QueryRow("SELECT Name, Username FROM users WHERE username = $1 LIMIT 1", username)
+		err := row.Scan(&user.Name, &user.Username)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				ctx.JSON(401, gin.H{"error": "unauthorized", "message": "User not found"})
+				ctx.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
+			ctx.JSON(500, gin.H{"error": "Failed to query user", "details": err.Error()})
+			ctx.AbortWithStatus(http.StatusInternalServerError)
 			return
 		}
 

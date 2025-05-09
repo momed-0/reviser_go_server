@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"database/sql"
 	"net/http"
 	"os"
 	"reviser/internal/inits"
@@ -20,26 +21,27 @@ func Signup(ctx *gin.Context) {
 	}
 
 	if ctx.BindJSON(&body) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid request"})
+		ctx.JSON(400, gin.H{"error": "Invalid request", "message": "Error trying to parse body!"})
 		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), 10)
 
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": err})
+		ctx.JSON(500, gin.H{"error": err, "message": "Error Trying to generate hash!"})
 		return
 	}
 
 	user := models.User{Name: body.Name, Username: body.Username, Password: string(hash)}
-	result := inits.DB.Create(&user)
+	_, err = inits.DB.Exec("INSERT INTO users (Name, Username, Password) VALUES ($1, $2, $3)",
+		user.Name, user.Username, user.Password)
 
-	if result.Error != nil {
-		ctx.JSON(500, gin.H{"error": result.Error})
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": err, "message": "Error Trying to insert credentials to db!"})
 		return
 	}
 
-	ctx.JSON(200, gin.H{"data": user})
+	ctx.JSON(200, gin.H{"data": user.Name})
 }
 
 func Login(ctx *gin.Context) {
@@ -49,15 +51,20 @@ func Login(ctx *gin.Context) {
 	}
 
 	if ctx.BindJSON(&body) != nil {
-		ctx.JSON(400, gin.H{"error": "Invalid request"})
+		ctx.JSON(400, gin.H{"error": "Invalid request", "message": "Error trying to parse body!"})
 		return
 	}
 
 	var user models.User
-	result := inits.DB.Where("username = ?", body.Username).First(&user)
 
-	if result.Error != nil {
-		ctx.JSON(500, gin.H{"error": "User not found"})
+	row := inits.DB.QueryRow("SELECT Name,Username, Password FROM users WHERE Username = $1", body.Username)
+
+	if err := row.Scan(&user.Name, &user.Username, &user.Password); err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(500, gin.H{"error": "User not found"})
+			return
+		}
+		ctx.JSON(400, gin.H{"error": "Invalid request", "message": "Error Trying to check credentials from db!"})
 		return
 	}
 

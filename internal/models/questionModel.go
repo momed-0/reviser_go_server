@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type StringArray []string
@@ -25,25 +23,20 @@ func (sa *StringArray) Scan(value interface{}) error {
 	return json.Unmarshal(bytes, sa)
 }
 
-type Question struct {
-	gorm.Model
-	Slug        string `gorm:"unique"`
+type Leetcode_Questions struct {
+	Slug        string
 	Title       string
 	Description string
 }
 
 type Question_Tags struct {
-	gorm.Model
-	Slug     string      `gorm:"unique" json:"slug"`
-	Tags     StringArray `gorm:"type:json" json:"tags"`           // Store as JSON in the database
-	Question Question    `gorm:"foreignKey:Slug;references:Slug"` // Foreign key relationship
+	Slug string
+	Tags StringArray
 }
 
 type Leetcode_submissions struct {
-	gorm.Model
-	Submission_ID uint   `gorm:"unique"`
-	Slug          string `gorm:"not null"`
+	Submission_ID uint
+	Question_Slug string
 	Code          string
 	Submitted_At  time.Time
-	Question      Question `gorm:"foreignKey:Slug;references:Slug"` // Foreign key relationship
 }

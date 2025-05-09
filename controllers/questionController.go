@@ -1,14 +1,14 @@
 package controllers
 
 import (
+	"database/sql"
+	"net/http"
 	"reviser/internal/inits"
 	"reviser/internal/models"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // FetchTagsBySlug retrieves tags by slug from the database
@@ -20,9 +20,13 @@ func FetchTagsBySlug(ctx *gin.Context) {
 	}
 	// Fetch the tags from the database using the slug
 	var tags models.Question_Tags
-	results := inits.DB.First(&tags, "slug = ?", slug)
-	if results.Error != nil {
-		ctx.JSON(404, gin.H{"error": "Tags not found"})
+	query := "SELECT tags FROM question_tags WHERE slug = $1"
+	err := inits.DB.QueryRowContext(ctx, query, slug).Scan(&tags.Tags)
+	if err == sql.ErrNoRows {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Tags not found"})
+		return
+	} else if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
 	ctx.JSON(200, gin.H{"tags": tags.Tags})
@@ -31,9 +35,10 @@ func FetchTagsBySlug(ctx *gin.Context) {
 // FetchQuestionsCount retrieves the count of questions from the database
 func FetchQuestionsCount(ctx *gin.Context) {
 	var count int64
-	results := inits.DB.Table("question_tags").Count(&count)
-	if results.Error != nil {
-		ctx.JSON(500, gin.H{"error": results.Error})
+	query := "SELECT COUNT(*) FROM question_tags"
+	err := inits.DB.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Database error"})
 		return
 	}
 	ctx.JSON(200, gin.H{"count": count})
@@ -41,12 +46,29 @@ func FetchQuestionsCount(ctx *gin.Context) {
 
 // FetchAllQuestions retrieves all questions from the database
 func FetchAllQuestions(ctx *gin.Context) {
-	var questions []models.Question
-	results := inits.DB.Find(&questions)
-	if results.Error != nil {
-		ctx.JSON(500, gin.H{"error": results.Error})
+	query := "SELECT slug, title, description FROM leetcode_questions"
+	rows, err := inits.DB.QueryContext(ctx, query)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
+	defer rows.Close()
+
+	var questions []models.Leetcode_Questions
+	for rows.Next() {
+		var q models.Leetcode_Questions
+		if err := rows.Scan(&q.Slug, &q.Title, &q.Description); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan row"})
+			return
+		}
+		questions = append(questions, q)
+	}
+
+	if err := rows.Err(); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Row iteration error"})
+		return
+	}
+
 	ctx.JSON(200, gin.H{"questions": questions})
 }
 
@@ -58,13 +80,50 @@ func FetchSubmissionsBySlug(ctx *gin.Context) {
 		ctx.JSON(400, gin.H{"error": "Slug is required"})
 		return
 	}
-	var submissions []models.Leetcode_submissions
-	results := inits.DB.Preload("Question").Where("slug = ?", slug).Find(&submissions)
-	if results.Error != nil {
-		ctx.JSON(404, gin.H{"error": "Question not found"})
+
+	query := `
+		SELECT 
+			s.submission_id, s.question_slug, s.code, s.submitted_at,
+			q.title, q.description
+		FROM leetcode_submissions s
+		JOIN leetcode_questions q ON s.question_slug = q.slug
+		WHERE s.question_slug = $1
+	`
+	rows, err := inits.DB.QueryContext(ctx, query, slug)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
-	ctx.JSON(200, gin.H{"submissions": submissions})
+	defer rows.Close()
+
+	var results []struct {
+		Submission models.Leetcode_submissions
+		Question   models.Leetcode_Questions
+	}
+	for rows.Next() {
+		var s struct {
+			Submission models.Leetcode_submissions
+			Question   models.Leetcode_Questions
+		}
+		if err := rows.Scan(
+			&s.Submission.Submission_ID,
+			&s.Submission.Question_Slug,
+			&s.Submission.Code,
+			&s.Submission.Submitted_At,
+			&s.Question.Title,
+			&s.Question.Description,
+		); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan row"})
+			return
+		}
+		results = append(results, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Row iteration error"})
+		return
+	}
+	ctx.JSON(200, gin.H{"submissions": results})
 }
 
 // FetchSubmissionsForDay retrieves submissions for a specific day
@@ -83,18 +142,48 @@ func FetchSubmissionsForDay(ctx *gin.Context) {
 		return
 	}
 	endOfDay := startOfDay.Add(time.Hour*23 + time.Minute*59 + time.Second*59)
-
-	var submissions []models.Leetcode_submissions
-	err := inits.DB.Preload("Question").
-		Where("submitted_at >= ? AND submitted_at <= ?", startOfDay, endOfDay).
-		Order("submitted_at DESC").
-		Find(&submissions).Error
-
+	query := `
+		SELECT
+		s.submission_id, s.question_slug, s.code, s.submitted_at,
+			q.title, q.description
+		FROM leetcode_submissions s
+		JOIN leetcode_questions q ON s.question_slug = q.slug
+		WHERE s.submitted_at BETWEEN $1 AND $2`
+	rows, err := inits.DB.QueryContext(ctx, query, startOfDay, endOfDay)
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Internal Error"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
-	ctx.JSON(200, gin.H{"submissions": submissions})
+	defer rows.Close()
+
+	var results []struct {
+		Submission models.Leetcode_submissions
+		Question   models.Leetcode_Questions
+	}
+	for rows.Next() {
+		var s struct {
+			Submission models.Leetcode_submissions
+			Question   models.Leetcode_Questions
+		}
+		if err := rows.Scan(
+			&s.Submission.Submission_ID,
+			&s.Submission.Question_Slug,
+			&s.Submission.Code,
+			&s.Submission.Submitted_At,
+			&s.Question.Title,
+			&s.Question.Description,
+		); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan row"})
+			return
+		}
+		results = append(results, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Row iteration error"})
+		return
+	}
+	ctx.JSON(200, gin.H{"submissions": results})
 }
 
 // FetchSubmissionsRange retrieves paginated response
@@ -112,16 +201,48 @@ func FetchSubmissionsRange(ctx *gin.Context) {
 		return
 	}
 
-	var submissions []models.Leetcode_submissions
-	err = inits.DB.Preload("Question").
-		Limit(to - from + 1).
-		Offset(from).
-		Find(&submissions).Error
+	query := `
+		SELECT
+		s.submission_id, s.question_slug, s.code, s.submitted_at,
+			q.title, q.description
+		FROM leetcode_submissions s
+		JOIN leetcode_questions q ON s.question_slug = q.slug
+		LIMIT $1 OFFSET $2`
+	rows, err := inits.DB.QueryContext(ctx, query, to, from)
 	if err != nil {
-		ctx.JSON(500, gin.H{"error": "Internal Error"})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
-	ctx.JSON(200, gin.H{"submissions": submissions})
+	defer rows.Close()
+
+	var results []struct {
+		Submission models.Leetcode_submissions
+		Question   models.Leetcode_Questions
+	}
+	for rows.Next() {
+		var s struct {
+			Submission models.Leetcode_submissions
+			Question   models.Leetcode_Questions
+		}
+		if err := rows.Scan(
+			&s.Submission.Submission_ID,
+			&s.Submission.Question_Slug,
+			&s.Submission.Code,
+			&s.Submission.Submitted_At,
+			&s.Question.Title,
+			&s.Question.Description,
+		); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan row"})
+			return
+		}
+		results = append(results, s)
+	}
+
+	if err := rows.Err(); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Row iteration error"})
+		return
+	}
+	ctx.JSON(200, gin.H{"submissions": results})
 }
 
 // UpsertTags will insert the tags if it doesn;t exists,
@@ -133,10 +254,12 @@ func UpsertTags(ctx *gin.Context) {
 		return
 	}
 
-	err := inits.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "slug"}},
-		DoUpdates: clause.AssignmentColumns([]string{"tags"}),
-	}).Create(&quesTag).Error
+	_, err := inits.DB.Exec(
+		`INSERT INTO question_tags (slug, tags) 
+			VALUES ($1, $2)
+			ON CONFLICT (slug)
+			DO UPDATE SET tags = $2`,
+		quesTag.Slug, quesTag.Tags)
 
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failed to upsert tags", "details": err.Error()})
@@ -153,9 +276,12 @@ func DeleteTags(ctx *gin.Context) {
 		return
 	}
 
-	result := inits.DB.Where("slug = ?", slug).Delete(&models.Question_Tags{})
-	if result.Error != nil {
-		ctx.JSON(500, gin.H{"error": "Failed to delete tags", "details": result.Error.Error()})
+	_, err := inits.DB.Exec(
+		`DELETE FROM question_tags
+		WHERE slug = $1`, slug)
+
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": "Failed to delete tags", "details": err.Error()})
 		return
 	}
 
@@ -164,13 +290,18 @@ func DeleteTags(ctx *gin.Context) {
 
 // InsertQuestions will upsert the questions into db
 func InsertQuestions(ctx *gin.Context) {
-	var question models.Question
+	var question models.Leetcode_Questions
 	if err := ctx.ShouldBindJSON(&question); err != nil {
 		ctx.JSON(400, gin.H{"error": "Invalid JSON payload", "details": err.Error()})
 		return
 	}
 
-	err := inits.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&question).Error
+	_, err := inits.DB.Exec(
+		`INSERT INTO LEETCODE_QUESTIONS (slug, title, description) 
+			VALUES ($1, $2, $3)
+			ON CONFLICT (slug)
+			DO UPDATE SET title = $2, description = $3`,
+		question.Slug, question.Title, question.Description)
 
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failed to upsert Question", "details": err.Error()})
@@ -187,10 +318,12 @@ func InsertSubmissions(ctx *gin.Context) {
 	}
 
 	// Check if the referenced Question exists
-	var question models.Question
-	if err := inits.DB.Where("slug = ?", submission.Slug).First(&question).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			ctx.JSON(400, gin.H{"error": "Referenced question not found", "slug": submission.Slug})
+	var question models.Leetcode_Questions
+	row := inits.DB.QueryRow("SELECT slug FROM leetcode_questions WHERE slug = $1 LIMIT 1", submission.Question_Slug)
+	err := row.Scan(&question.Slug)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(400, gin.H{"error": "Referenced question not found", "slug": submission.Question_Slug})
 			return
 		}
 		ctx.JSON(500, gin.H{"error": "Failed to query question", "details": err.Error()})
@@ -198,7 +331,11 @@ func InsertSubmissions(ctx *gin.Context) {
 	}
 
 	// Create the submission
-	if err := inits.DB.Create(&submission).Error; err != nil {
+	_, err = inits.DB.Exec(
+		`INSERT INTO LEETCODE_SUBMISSIONS (Submission_ID, Question_Slug, Code,Submitted_At) 
+			VALUES ($1, $2, $3, $4)`,
+		submission.Submission_ID, submission.Question_Slug, submission.Code, submission.Submitted_At)
+	if err != nil {
 		ctx.JSON(500, gin.H{"error": "Failed to insert submission", "details": err.Error()})
 		return
 	}
