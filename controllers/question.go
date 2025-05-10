@@ -207,6 +207,7 @@ func FetchSubmissionsRange(ctx *gin.Context) {
 			q.title, q.description
 		FROM leetcode_submissions s
 		JOIN leetcode_questions q ON s.question_slug = q.slug
+		ORDER BY s.submitted_at DESC
 		LIMIT $1 OFFSET $2`
 	rows, err := inits.DB.QueryContext(ctx, query, to, from)
 	if err != nil {
