@@ -94,7 +94,7 @@ func Login(ctx *gin.Context) {
 	} else {
 		ctx.SetSameSite(http.SameSiteLaxMode)
 	}
-	ctx.SetCookie("Authorization", tokenString, 3600*24*30, "", domain, secure, true)
+	ctx.SetCookie("Authorization", tokenString, 3600*24*30, "/", domain, secure, true)
 	ctx.JSON(200, gin.H{"data": "Successfully logged in!", "user": body.Username})
 }
 
@@ -115,6 +115,6 @@ func Logout(ctx *gin.Context) {
 	} else {
 		ctx.SetSameSite(http.SameSiteLaxMode)
 	}
-	ctx.SetCookie("Authorization", "", -1, "", domain, secure, true)
+	ctx.SetCookie("Authorization", "", -1, "/", domain, secure, true)
 	ctx.JSON(200, gin.H{"data": "You are logged out!"})
 }
