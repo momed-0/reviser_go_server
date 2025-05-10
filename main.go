@@ -30,7 +30,7 @@ func main() {
 	// Authentication routes
 	{
 		authGroups := r.Group("/auth")
-		authGroups.POST("/validate", middlewares.RequireAuth, controllers.Validate)
+		authGroups.GET("/validate", middlewares.RequireAuth, controllers.Validate)
 		authGroups.POST("/signup", controllers.Signup)
 		authGroups.POST("/login", controllers.Login)
 		authGroups.POST("/logout", middlewares.RequireAuth, controllers.Logout)
